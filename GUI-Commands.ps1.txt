@@ -1,0 +1,760 @@
+# GUI-Commands.ps1
+# Helper functions for creating Windows Forms GUIs with consistent styling and clear disposal.
+
+[void] [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms")
+[void] [System.Reflection.Assembly]::LoadWithPartialName("System.Drawing")
+
+###### INTENT OF THIS SCRIPT ######
+# This script provides helper functions for creating GUI forms with simplified syntax for sysadmin scripts.
+
+#region THEME DEFINITIONS
+
+### Color Palette ###
+$Global:ColorFormBackground = [System.Drawing.Color]::FromArgb(240, 240, 240)
+$Global:ColorControlBackground = [System.Drawing.Color]::White
+$Global:ColorPanelBackground = [System.Drawing.Color]::WhiteSmoke
+$Global:ColorTextPrimary = [System.Drawing.Color]::Black
+$Global:ColorTextSecondary = [System.Drawing.Color]::FromArgb(64, 64, 64)
+
+# Style Colors
+$Global:ColorPrimary = [System.Drawing.Color]::FromArgb(70, 130, 180)     # Steel Blue
+$Global:ColorSuccess = [System.Drawing.Color]::FromArgb(34, 139, 34)      # Forest Green
+$Global:ColorDanger = [System.Drawing.Color]::FromArgb(220, 20, 60)       # Crimson
+$Global:ColorWarning = [System.Drawing.Color]::FromArgb(255, 140, 0)      # Dark Orange
+$Global:ColorInfo = [System.Drawing.Color]::FromArgb(112, 128, 144)       # Slate Gray
+$Global:ColorSecondary = [System.Drawing.Color]::FromArgb(108, 117, 125)  # Medium Gray
+
+### Fonts ###
+$Global:FontSmall = [System.Drawing.Font]::new("Segoe UI", 9)    
+$Global:FontNormal = [System.Drawing.Font]::new("Segoe UI", 10)
+$Global:FontLarge = [System.Drawing.Font]::new("Segoe UI", 12)
+$Global:FontBold = [System.Drawing.Font]::new("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+
+### Button Sizes ###
+$Global:ButtonSizeSmall = @{ Wdith = 75 ; Height = 25 }
+$Global:ButtonSizeMedium = @{ Wdith = 100 ; Height = 35 }         
+$Global:ButtonSizeLarge = @{ Width = 150 ; Height = 45 }
+
+### Spacing ###
+$Global:StandardPadding = 10
+$Global:StandardMargin = 20
+
+#endregion 
+
+
+#region HELPER FUNCTIONS
+
+Function Get-ButtonSize {
+    [CmdletBinding()]
+    Param(
+        [ValidateSet('Small','Medium','Large')] [string]$Size
+    )
+
+    switch ($size) {
+        'Small'  { return $ButtonSizeSmall }
+        'Medium' { return $ButtonSizeMedium }
+        'Large'  { return $ButtonSizeLarge }
+    }
+}
+
+Function Get-CenterPosition {
+    [CmdletBinding()]
+    Param( 
+        [Parameter(Mandatory)] $ParentControl,
+        [Parameter(Mandatory)] [int]$ControlWidth,
+        [Parameter(Mandatory)] [int]$ControlHeight
+    )
+
+    $x = ($ParentControl.ClientSize.Width - $ControlWidth) / 2
+    $y = ($ParentControl.ClientSize.Height - $ControlHeight) / 2
+
+    return @{ X = [int]$x ; Y = [int]$y }
+}
+
+Function Get-BelowPosition {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)]$AboveControl,
+        [int]$Spacing = $StandardPadding
+    )
+
+    return ($AboveControl.Location.Y + $AboveControl.Height + $Spacing)
+}
+
+#endregion
+
+#region FORM LIFECYCLE MANAGEMENT (Clean Disposal)
+
+Function Invoke-Form {
+    <# 
+        This shows a form with automatic cleanup to prevent ANY powershell session (including ISE)
+        from freezing, or not responding.
+        It creates a clean disposal process whether using a defined "Close" button, the red X, or
+        by pressing ALT + F4. 
+        This will be used to initial WinForms. 
+    #>
+
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)] [System.Windows.Forms.Form]$Form,
+        [switch]$AddCloseButton
+    )
+
+    # Add cleanup event handlers
+    $Form.Add_FormClosed({
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
+    })
+
+    # Optionall add a close button
+    if ($AddCloseButton) {
+        $btnClose = New-Object System.Windows.Forms.Button 
+        $btnClose.Size = New-Object System.Drawing.Size(100, 35)
+        $btnClose.Location = New-Object System.Drawing.Point( 
+            ($Form.ClientSize.Width -120 ),
+            ($Form.ClientSize.Height - 50)
+        )
+        $btnClose.Text = "Close"
+        $btnClose.Font = $FontNormal
+        $btnClose.BackColor = $ColorSecondary
+        $btnClose.ForeColor = [System.Drawing.Color]::White 
+        $btnClose.Anchor = 'Bottom,Right'
+        $btnClose.Add_Click({ $Form.Close() })
+        
+        $Form.Controls.Add($btnClose)
+    }
+
+    # Show form with proper cleanup
+    try {
+        $result = $Form.ShowDialog()
+        return $result 
+    }
+    finally {
+        if ($Form -ne $null) { $Form.Dispose() }
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
+    }
+}
+
+Function Add-CloseButton {
+    <# Adds a properly configured close button to a form. Use this when you want manual contorl over the close button placement #>
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)]$Form,
+        [int]$xsize = 100,
+        [int]$ysize = 35,
+        [Parameter(Mandatory)] [int]$xpos,
+        [Parameter(Mandatory)] [int]$ypos,
+        [string]$text = "Close"
+    )
+
+    $btnClose = Add-Button $xsize $ysize $xpos $ypos $text -Style Secondary
+    $btnClose.Add_Click({ $Form.Close() })
+
+    return $btnClose
+}
+
+#endregion
+
+#region FORM
+
+Function Add-Form {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)] [int]$xsize,
+        [Parameter(Mandatory)] [int]$ysize,
+        [Parameter(Mandatory)] [string]$text
+    )
+
+    $form = New-object System.Windows.Forms.Form
+    $form.Size = New-object System.Drawing.Size($xsize, $ysize)
+    $form.Text = $text
+    $form.StartPosition = 'CenterScreen'
+    $form.FormBorderStyle = 'Fixed3D'
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $true
+    $form.BackColor = $Global:ColorFormBackground
+
+    return $form 
+}
+
+#endregion
+
+#region CONTAINER CONTROLS
+
+Function Add-Panel {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)] [int]$xsize,
+        [Parameter(Mandatory)] [int]$ysize,
+        [Parameter(Mandatory)] [int]$xpos,
+        [Parameter(Mandatory)] [int]$ypos,
+        [switch]$Border,
+        [System.Drawing.Color]$BackColor = $ColorPanelBackground 
+    )
+
+    $panel = New-Object System.Windows.Forms.Panel
+    $panel.Size = New-Object System.Drawing.Size($xsize, $ysize)
+    $panel.Location = New-Object System.Drawing.Point($xpos, $ypos)
+
+    if ($border) {
+        $panel.BorderStyle = 'Fixed3D'
+    }
+
+    return $panel
+}
+
+Function Add-GroupBox {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)] [int]$xsize,
+        [Parameter(Mandatory)] [int]$ysize,
+        [Parameter(Mandatory)] [int]$xpos,
+        [Parameter(Mandatory)] [int]$ypos,
+        [Parameter(Mandatory)] [string]$text
+    )
+
+    $groupBox = New-Object System.Windows.Forms.GroupBox
+    $groupBox.Size = New-Object System.Drawing.Size($xsize, $ysize)
+    $groupBox.Location = New-Object System.Drawing.Point($xpos, $ypos)
+    $groupBox.Text = $text
+    $groupBox.Font = $FontNormal 
+
+    return $groupBox
+}
+
+Function Add-TabControl {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)] [int]$xsize,
+        [Parameter(Mandatory)] [int]$ysize,
+        [Parameter(Mandatory)] [int]$xpos,
+        [Parameter(Mandatory)] [int]$ypos
+    )
+
+    $tabControl = New-Object System.Windows.Forms.TabControl
+    $tabControl.Size = New-Object System.Drawing.Size($xsize, $ysize)
+    $tabControl.Location = New-Object System.Drawing.Point($xpos, $ypos)
+    $tabControl.Font = $FontNormal 
+
+    return $tabControl
+}
+
+Function Add-TabPage {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)] [string]$text
+    )
+
+    $tabPage = New-Object System.Windows.Forms.TabPage
+    $tabPage.Text = $text
+    $tabPage.UseVisualStyleBackColor = $true
+
+    return $tabPage
+}
+
+Function Add-Background {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)] [int]$xsize,
+        [Parameter(Mandatory)] [int]$ysize,
+        [Parameter(Mandatory)] [int]$xpos,
+        [Parameter(Mandatory)] [int]$ypos,
+        [System.Drawing.Color]$BackColor = $ColorPanelBackground 
+    )
+
+    $pictureBox = New-Object System.Windows.Forms.PictureBox
+    $pictureBox.Size = New-Object System.Drawing.Size($xsize, $ysize)
+    $pictureBox.Location = New-Object System.Drawing.Point($xpos, $ypos)
+    $pictureBox.BackColor = $BackColor
+    $pictureBox.BorderStyle = 'Fixed3D'
+    $pictureBox.SendToBack()
+
+    return $pictureBox
+}
+
+#endregion
+
+#region INPUT CONTROLS
+
+Function Add-Button {
+    [CmdletBinding(DefaultParameterSetName='Manual')]
+    Param(
+        [Parameter(ParameterSetName='Manual', Position=0)] [int]$xsize,
+        [Parameter(ParameterSetName='Manual', Position=1)] [int]$ysize,
+        [Parameter(ParameterSetName='Preset', Position=0)]
+        [Parameter(ParameterSetName='Manual', Position=2)] [int]$xpos,
+        [Parameter(ParameterSetName='Preset', Position=1)]
+        [Parameter(ParameterSetName='Manual', Position=3)] [int]$ypos,
+        [Parameter(ParameterSetName='Preset', Position=2)]
+        [Parameter(ParameterSetName='Manual', Position=4)] [string]$text = "",
+        [Parameter(ParameterSetName='Preset')]
+        [ValidateSet('Small', 'Medium', 'Large')] [string]$Size = 'Medium',
+        [ValidateSet('Default', 'Primary', 'Success', 'Danger', 'Warning', 'Info', 'Secondary')] [string]$Style = 'Default',
+        [bool]$Enabled = $true
+    )
+
+    $button = New-Object System.Windows.Forms.Button
+
+    # Handle sizing
+    if ($PSCmdlet.ParameterSetName -eq 'Preset') {
+        $btnSize = Get-ButtonSize -Size $Size 
+        $button.Size = New-Object System.Drawing.Size($btnSize.Width, $btnSize.Height)
+    }
+    else {
+        $button.Size = New-Object System.Drawing.Size($xsize, $ysize)
+    }
+
+    $button.Location = New-Object System.Drawing.Point($xpos, $ypos)
+    $button.Text = $text
+    $button.Font = $FontNormal 
+    $button.Enabled = $Enabled
+
+    # Apply Style Colors
+    switch ($Style) {
+        'Primary' {
+            $button.BackColor = $ColorPrimary 
+            $button.ForeColor = [System.Drawing.Color]::White 
+        }
+
+        'Success' {
+            $button.BackColor = $ColorSuccess 
+            $button.ForeColor = [System.Drawing.Color]::White
+        }
+
+        'Danger' {
+            $button.BackColor = $ColorDanger
+            $button.ForeColor = [System.Drawing.Color]::White 
+        }
+
+        'Warning' {
+            $button.BackColor = $ColorWarning 
+            $button.ForeColor = [System.Drawing.Color]::Black
+        }
+        'Info' {
+            $button.BackColor = $ColorInfo 
+            $button.ForeColor = [System.Drawing.Color]::White 
+        }
+
+        'Secondary' {
+            $button.BackColor = $ColorSecondary
+            $button.ForeColor = [System.Drawing.Color]::White
+        }
+    }
+
+    return $button
+}
+
+Function Add-TextBox {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)] [int]$xsize,
+        [Parameter(Mandatory)] [int]$ysize,
+        [Parameter(Mandatory)] [int]$xpos,
+        [Parameter(Mandatory)] [int]$ypos,
+        [string]$text = "",
+        [switch]$Multiline,
+        [switch]$ReadOnly,
+        [int]$MaxLength = 0,
+        [bool]$Enabled = $true
+    )
+
+    $textBox = New-Object System.Windows.Forms.TextBox
+    $textBox.Size = New-Object System.Drawing.Size($xsize, $ysize)
+    $textBox.Location = New-Object System.Drawing.Point($xpos, $ypos)
+    $textBox.Text = $text
+    $textBox.Font = $FontNormal 
+    $textBox.Multiline = $Multiline
+    $textBox.ReadOnly = $ReadOnly
+    $textBox.Enabled = $Enabled
+
+    if ($MaxLength -gt 0) {
+        $textBox.MaxLength = $MaxLength
+    }
+
+    if ($ReadOnly) {
+        $textBox.BackColor = [System.Drawing.Color]::FromArgb(245, 245, 245)
+    }
+    else {
+        $textBox.BackColor = $ColorControlBackground
+    }
+
+    return $textBox
+}
+
+Function Add-RichTextBox {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)] [int]$xsize,
+        [Parameter(Mandatory)] [int]$ysize,
+        [Parameter(Mandatory)] [int]$xpos,
+        [Parameter(Mandatory)] [int]$ypos,
+        [string]$text = "",
+        [switch]$ReadOnly,
+        [bool]$WordWrap = $true,
+        [bool]$Enabled = $true
+    )
+
+    $richTextBox = New-Object System.Windows.Forms.RichTextBox
+    $richTextBox.Size = New-Object System.Drawing.Size($xsize, $ysize)
+    $richTextBox.Location = New-Object System.Drawing.Point($xpos, $ypos)
+    $richTextBox.Text = $text 
+    $richTextBox.Font = $FontNormal 
+    $richTextBox.ReadOnly = $ReadOnly
+    $richTextBox.WordWrap = $WordWrap
+    $richTextBox.Enabled = $Enabled
+
+    if ($ReadOnly) {
+        $richTextBox.BackColor = [System.Drawing.Color]::FromArgb(245, 245, 245)
+    }
+    else {
+        $richTextBox.BackColor = $ColorControlBackground 
+    }
+
+    return $richTextBox
+}
+
+Function Add-CheckBox {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)] [int]$xsize,
+        [Parameter(Mandatory)] [int]$ysize,
+        [Parameter(Mandatory)] [int]$xpos,
+        [Parameter(Mandatory)] [int]$ypos,
+        [Parameter(Mandatory)] [string]$text,
+        [bool]$Checked = $false,
+        [bool]$Enabled = $true
+    )
+
+    $checkBox = New-Object System.Windows.Forms.CheckBox
+    $checkBox.Size = New-Object System.Drawing.Size($xsize, $ysize)
+    $checkBox.Location = New-Object System.Drawing.Point($xpos, $ypos)
+    $checkBox.Text = $text
+    $checkBox.Font = $FontNormal 
+    $checkBox.Checked = $Checked
+    $checkBox.Enabled = $Enabled
+
+    return $checkBox
+}
+
+Function Add-RadioButton {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)] [int]$xsize,
+        [Parameter(Mandatory)] [int]$ysize,
+        [Parameter(Mandatory)] [int]$xpos,
+        [Parameter(Mandatory)] [int]$ypos,
+        [Parameter(Mandatory)] [string]$text,
+        [bool]$Checked = $false,
+        [bool]$Enabled = $true
+    )
+
+    $radioButton = New-Object System.Windows.Forms.RadioButton
+    $radioButton.Size = New-Object System.Drawing.Size($xsize, $ysize)
+    $radioButton.Location = New-Object System.Drawing.Point($xpos, $ypos)
+    $radioButton.text = $text
+    $radioButton.Font = $FontNormal 
+    $radioButton.Checked = $Checked
+    $radioButton.Enabled = $Enabled
+
+    return $radioButton
+}
+
+Function Add-ComboBox {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)] [int]$xsize,
+        [Parameter(Mandatory)] [int]$ysize,
+        [Parameter(Mandatory)] [int]$xpos,
+        [Parameter(Mandatory)] [int]$ypos,
+        [ValidateSet('DropDown', 'DropDownList', 'Simple')] [string]$Style = 'DropDownList',
+        [array]$Items
+    )
+
+    $comboBox = New-Object System.Windows.Forms.ComboBox
+    $comboBox.Size = New-Object System.Drawing.Size($xsize, $ysize)
+    $comboBox.Location = New-Object System.Drawing.Point($xpos, $ypos)
+    $comboBox.Font = $FontNormal 
+    $comboBox.DropDownStyle = $Style
+
+    if ($Items) {
+        $comboBox.Items.AddRange($Items)
+    }
+
+    return $comboBox
+}
+
+Function Add-ListBox {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)] [int]$xsize,
+        [Parameter(Mandatory)] [int]$ysize,
+        [Parameter(Mandatory)] [int]$xpos,
+        [Parameter(Mandatory)] [int]$ypos,
+        [ValidateSet('One', 'MultiSimple', 'MultiExtended')] [string]$SelectionMode = 'One',
+        [array]$Items
+    )
+
+    $listBox = New-Object System.Windows.Forms.ListBox
+    $listBox.Size = New-Object System.Drawing.Size($xsize, $ysize)
+    $listBox.Location = New-Object System.Drawing.Point($xpos, $ypos)
+    $listBox.Font = $FontNormal 
+    $listBox.SelectionMode = $SelectionMode
+    
+    if ($Items) {
+        $listBox.Items.AddRange($Items)
+    }
+
+    return $listBox
+}
+
+Function Add-CheckedListBox {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)] [int]$xsize,
+        [Parameter(Mandatory)] [int]$ysize,
+        [Parameter(Mandatory)] [int]$xpos,
+        [Parameter(Mandatory)] [int]$ypos,
+        [bool]$CheckOnClick = $true,
+        [array]$Items
+    )
+
+    $checkedListBox = New-Object System.Windows.Forms.CheckedListBox
+    $checkedListBox.Size = New-Object System.Drawing.Size($xsize, $ysize)
+    $checkedListBox.Location = New-Object System.Drawing.Point($xpos, $ypos)
+    $checkedListBox.Font = $FontNormal 
+    $checkedListBox.CheckOnClick = $CheckOnClick
+
+    if ($Items) {
+        $checkedListBox.Items.AddRange($Items)
+    }
+
+    return $checkedListBox
+}
+
+#endregion
+
+#region DISPLAY CONTROLS
+
+Function Add-Label {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)] [int]$xsize,
+        [Parameter(Mandatory)] [int]$ysize,
+        [Parameter(Mandatory)] [int]$xpos,
+        [Parameter(Mandatory)] [int]$ypos,
+        [string]$text = "",
+        [ValidateSet('Small', 'Normal', 'Large', 'Bold')] [string]$FontSize = 'Normal',
+        [ValidateSet('Left', 'Center', 'Right')] [string]$TextAlign = 'Center',
+        [switch]$NoBorder,
+        [System.Drawing.Color]$ForeColor = $ColorTextPrimary ,
+        [System.Drawing.Color]$BackColor = $ColorControlBackground 
+    )
+
+    $label = New-Object System.Windows.Forms.Label
+    $label.Size = New-Object System.Drawing.Size($xsize, $ysize)
+    $label.Location = New-Object System.Drawing.Point($xpos, $ypos)
+    $label.Text = $text 
+    $label.BackColor = $BackColor
+    $label.ForeColor = $ForeColor
+
+    # Set font based on size
+    switch ($FontSize) {
+        'Small'  { $label.Font = $FontSmall }
+        'Normal' { $label.Font = $FontNormal }
+        'Large'  { $label.Font = $FontLarge }
+        'Bold'   { $label.Font = $FontBold }
+    }
+
+    # Set text alignment
+    switch ($TextAlign) {
+        'Left'   { $label.TextAlign = 'MiddleLeft' }
+        'Center' { $label.TextAlign = 'MiddleCenter' }
+        'Right'  { $label.TextAlign = 'MiddleRight' }
+    }
+
+    # set border
+    if (-not $NoBorder) {
+        $label.BorderStyle = 'FixedSingle'
+    }
+
+    return $label
+}
+
+Function Add-ListView {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)] [int]$xsize,
+        [Parameter(Mandatory)] [int]$ysize,
+        [Parameter(Mandatory)] [int]$xpos,
+        [Parameter(Mandatory)] [int]$ypos
+    )
+
+    $listView = New-Object System.Windows.Forms.ListView
+    $listView.Size = New-Object System.Drawing.Size($xsize, $ysize)
+    $listView.Location = New-Object System.Drawing.Point($xpos, $ypos)
+    $listView.Font = $FontNormal 
+    $listView.View = "Details"
+    $listView.FullRowSelect = $true
+    $listView.GridLines = $true
+
+    return $listView
+}
+
+Function Add-ListViewItem {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)] [string]$PrimaryItem,
+        [string[]]$SecondaryItems
+    )
+
+    $listViewItem = New-Object System.Windows.Forms.ListViewItem
+
+    if ($SecondaryItems) {
+        foreach ($item in $SecondaryItems) {
+            [void]$listViewItem.SubItems.Add($item)
+        }
+    }
+
+    return $listViewItem
+}
+
+Function Add-DataGridView {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)] [int]$xsize,
+        [Parameter(Mandatory)] [int]$ysize,
+        [Parameter(Mandatory)] [int]$xpos,
+        [Parameter(Mandatory)] [int]$ypos,
+        [bool]$ReadOnly = $true,
+        [bool]$AllowUserToAddRows = $false
+    )
+
+    $dataGridView = New-Object System.Windows.Forms.DataGridView
+    $dataGridView.Size = New-Object System.Drawing.Size($xsize, $ysize)
+    $dataGridView.Location = New-Object System.Drawing.Point($xpos, $ypos)
+    $dataGridView.Font = $FontNormal 
+    $dataGridView.BackgroundColor = $ColorControlBackground 
+    $dataGridView.ReadOnly = $ReadOnly
+    $dataGridView.AllowUserToAddRows = $AllowUserToAddRows
+    $dataGridView.AllowUserToDeleteRows = $false
+    $dataGridView.SelectionMode = 'FullRowSelect'
+    $dataGridView.MultiSelect = $false
+    $dataGridView.RowHeadersVisible = $false
+    $dataGridView.AutoSizeColumnsMode = 'Fill'
+
+    return $dataGridView
+}
+
+Function Add-ProgressBar {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)] [int]$xsize,
+        [Parameter(Mandatory)] [int]$ysize,
+        [Parameter(Mandatory)] [int]$xpos,
+        [Parameter(Mandatory)] [int]$ypos,
+        [int]$Min = 0,
+        [int]$Max = 100,
+        [int]$Value = 0,
+        [ValidateSet('Continuous', 'Marquee')] [string]$Style = 'Continuous'
+    )
+
+    $progressBar = New-Object System.Windows.Forms.ProgressBar
+    $progressBar.Size = new-object System.Drawing.Size($xsize, $ysize)
+    $progressBar.Location = New-Object System.Drawing.Point($xpos, $ypos)
+    $progressBar.Minimum = $Min
+    $progressBar.Maximum = $Max
+    $progressBar.Value = $Value
+    $progressBar.Style = $Style
+
+    return $progressBar
+}
+
+#endregion
+
+#region DIALOG FUNCTIONS
+
+Function Add-OpenFileDialog {
+    [CmdletBinding()]
+    Param(
+        [string]$Filter = "All Files (*.*)|*.*",
+        [string]$Title = "Select File",
+        [string]$InitialDirectory = ""
+    )
+
+    $openFileDialog = New-Object System.Windows.Forms.OpenFileDialog
+    $openFileDialog.Filter = $Filter
+    $openFileDialog.Title = $Title
+
+    if ($InitialDirectory) {
+        $openFileDialog.InitialDirectory = $InitialDirectory
+    }
+
+    $result = $openFileDialog.ShowDialog()
+
+    if ($result -eq 'OK') {
+        return $openFileDialog.FileName
+    }
+    else {
+        return $null
+    }
+}
+
+Function Add-SaveFileDialog {
+    [CmdletBinding()]
+    Param(
+        [string]$Filter = "AllFiles (*.*)|*.*",
+        [string]$Title = "Save File",
+        [string]$InitialDirectory = "",
+        [string]$DefaultExt = ""
+    )
+
+    $saveFileDialog = New-Object System.Windows.Forms.SaveFileDialog
+    $saveFileDialog.Filter = $Filter
+    $saveFileDialog.Title = $Title
+
+    if ($InitialDirectory) {
+        $saveFileDialog.InitialDirectory = $InitialDirectory
+    }
+    
+    if ($DefaultExt) {
+        $saveFileDialog.DefaultExt = $DefaultExt
+    }
+
+    $result = $saveFileDialog.ShowDialog()
+
+    if ($result -eq 'OK') {
+        return $saveFileDialog.FileName
+    }
+    else {
+        return $null
+    }
+}
+
+Function Add-FolderBrowserDialog {
+    [CmdletBinding()]
+    Param(
+        [string]$Description = "Select Folder",
+        [string]$SelectedPath = ""
+    )
+
+    $folderBrowserDialog = New-Object System.Windows.Forms.FolderBrowserDialog
+    $folderBrowserDialog.Description = $Description
+
+    if ($SelectedPath) {
+        $folderBrowserDialog.SelectedPath = $SelectedPath
+    }
+
+    $result = $folderBrowserDialog.ShowDialog()
+
+    if ($result -eq 'OK') {
+        return $folderBrowserDialog.SelectedPath
+    }
+    else {
+        return $null
+    }
+}
+
+#endregion
+
+    

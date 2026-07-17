@@ -1,0 +1,105 @@
+
+
+<#
+ .Synopsis
+  Retrieve all Printer information for every Print Server on the domain 
+
+ .Description
+  Allows the Administrator to easily access Printer information of all Print Servers connected on the domain
+
+ .Example
+    Get-DomainPrinters
+    # Runs the Script normally.
+
+ .Example
+    Get-DomainPrinters 
+    # Opens the created report file after completion.
+   
+#>
+
+$fpServers = (Get-ADComputer -filter "operatingsystem -like '*server*' -and name -like '*FP03' -or name -like '*FP07'").Name 
+$folder = "\\server\admin\scripts\Monthly Scripts\Printers\Reports"
+$LogDate = Get-Date -Format "dd MMM yyyy"
+$LogTime = Get-Date -Format "hhmmss"
+$Logfile = "$folder\Printers-$LogDate-$LogTime.csv"
+
+[int]$scnt = 0
+[int]$pcnt = 0
+[int]$qsOnline = 0
+[int]$qsBadPort = 0
+[int]$qsShared = 0
+[int]$qsPublished = 0
+
+[int]$TotalSvrs = $fpServers.count 
+$AllPrinters = @()
+$Report = @()
+
+Write-Host ""
+Write-Host " ==== BEGINNING TO GRAB PRINTERS ==== " -f Yellow -b Black
+Write-Host ""
+
+ForEach($svr in $fpServers){
+    $scnt++
+    Write-Host "$scnt/$TotalSvrs - " -f Gray -no 
+    Write-Host "Gathering Printers from $svr..." -no 
+    If(!(Test-Connection -ComputerName $svr -Quiet -count 2 -BufferSize 16)){ Write-Host "Offline." -f Red ; Continue }
+    
+    Try { 
+        $Printers = Invoke-Command -ComputerName $svr -ScriptBlock { @(Get-Printer | where PortName -ne 'PortPrompt:') } -ErrorAction Si 
+        $AllPrinters += $Printers
+    } Catch { Write-Warning "Could not Gather Printers. Check Spooler." ; Continue }
+
+    Write-Host "Done." -f Green
+}
+
+Write-Host ""
+Write-Host " ==== BEGINNING TO GO THROUGH EACH PRINTER ==== " -f Yellow -b Black
+Write-Host ""
+
+ForEach($printer in $AllPrinters){
+    $pcnt++ 
+
+    $obj = New-Object PSObject 
+    $obj | Add-Member NoteProperty -Name "ServerName" -Value "$($Printer.PSComputerName)"
+    $obj | Add-Member NoteProperty -Name "PrinterName" -Value "$($Printer.Name)"
+    $obj | Add-Member NoteProperty -Name "Status" -Value $null
+    $obj | Add-Member NoteProperty -Name "Port" -Value "$($Printer.PortName)"
+    $obj | Add-Member NoteProperty -Name "Shared" -Value "$($Printer.Shared)"
+    $obj | Add-Member NoteProperty -Name "ShareName" -Value "$($Printer.ShareName)"
+    $obj | Add-Member NoteProperty -Name "Published" -Value "$($Printer.Published)"
+    $Obj | Add-Member NoteProperty -Name "DriverName" -Value "$($Printer.DriverName)"
+
+
+    Write-Host "$pcnt/$($AllPrinters.count) - " -f Gray -no  ; Write-Host "$($obj.PrinterName) " -no ; Write-Host "on " -f Gray -no ; Write-Host "$($obj.ServerName)" -no ; Write-Host " ... " -f Gray -no 
+    Write-Host "$($obj.Port)" -no  ; Write-Host " - " -f Gray -no
+    If(!(($ping = ping $($printer.PortName) -n 3) -match "Reply from")){ $obj.Status = "Offline" ; Write-Host "Offline" -f Red } Else{ $obj.Status = "Online" ; Write-Host "Online" -f Green } 
+    
+
+    If($obj.Status -eq "Online"){ $qsOnline++ }
+    If($obj.Shared -eq "True"){ $qsShared++ }
+    If($obj.Published -eq "True"){ $qsPublished++ }
+    If(!($obj.Port -as [ipaddress] -as [bool])){ $qsBadPort++ }
+
+    $Report += $obj 
+}
+
+Write-Host "" 
+Write-Host " ==== QUICK STATS ==== " -f Yellow -b Black
+Write-Host ""
+Write-Host "Printer Count: " -no ; Write-Host "$($AllPrinters.count) Printers" -no  ; Write-Host " on " -f Gray -no ; Write-Host "$($fpServers.count) Servers"
+Write-Host "Printers Online: " -no ; Write-Host "$qsOnline" -no ; Write-Host " of "  -f Gray -no ; Write-Host "$($AllPrinters.count)"
+Write-Host "Printers Shared: " -no ; Write-Host "$qsShared" -no ; Write-Host " of " -f Gray -no ; Write-Host "$($AllPrinters.count)"
+Write-Host "Printers Published: " -no ; Write-Host "$qsPublished" -no ; Write-Host " of " -f Gray -no ; Write-Host "$($AllPrinters.count)"
+Write-Host "Printers with BAD Ports : " -no ; Write-Host "$qsBadPort" -no ; Write-Host " of " -f Gray -no ; Write-Host "$($AllPrinters.Count)"
+
+Write-Host ""
+$Report | Export-Csv -Path $Logfile -NoTypeInformation -Encoding UTF8
+Write-Host "Report saved to $Logfile" 
+
+Write-Host "Opening report...." 
+Invoke-Item $Logfile
+Write-Host "Script Complete." -f Green
+
+
+$logpath = "\\server\admin\SysAdmin Powershell Module\Scripts\BattleRythm\Logs\Log_BattleRhythm.csv"
+Add-Content -Path $logpath -Value "`Disable-StaleUsers,$(get-date -Format 'MM/d/yyyy hh:mm:ss'),$(whoami)"

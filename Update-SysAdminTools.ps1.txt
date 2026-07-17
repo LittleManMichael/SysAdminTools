@@ -1,0 +1,198 @@
+# Update-SysAdmin.ps1
+# Push SysAdmin module to remote machines safely
+function Update-SysAdminTools {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$false)]
+        [string]$SourceModuleRoot = '\\server\admin\SysAdmin Powershell Module\SysAdminTools',
+
+        [Parameter(Mandatory=$false)]
+        [string]$ModuleName = 'SysAdminTools',
+
+        [Parameter(Mandatory=$false)]
+        [string[]]$ComputerName,
+
+        [Parameter(Mandatory=$false)]
+        [string]$ComputerListPath = (Get-SysAdminComputerList), #'\\server\admin\SysAdmin Powershell Module\Data\SysAdmin_Computers.txt',
+
+        [Parameter(Mandatory=$false)]
+        [switch]$AddToList,
+    
+        [Parameter(Mandatory=$false)]
+        [switch]$Force,
+    
+        [Parameter(Mandatory=$false)]
+        [switch]$PruneOldVersions
+    )
+
+    $ErrorActionPreference = 'Stop'
+
+    function Get-ModuleVersionFromPsd1 {
+        param([string]$Psd1Path)
+        $m = Import-PowerShellDataFile -Path $Psd1Path
+        return [version]$m.ModuleVersion
+    }
+
+    function Get-HighestVersionFolder {
+     param([string]$Path)
+     if (-not (Test-Path $Path)) { return $null }
+
+     $dirs = Get-ChildItem -Path $Path -Directory -ErrorAction SilentlyContinue
+     if (-not $dirs) { return $null }
+
+      $versions = $dirs.Name | ForEach-Object {
+          try { [version]$_ } catch { $null }
+       } | Where-Object { $_ -ne $null }
+
+       if (-not $versions) { return $null }
+        return ($versions | Sort-Object -Descending | Select-Object -First 1)
+    }
+
+    # --- Validate Source
+    $sourcePsd1 = Join-Path $SourceModuleRoot "$ModuleName.psd1"
+    if (-not (Test-Path $sourcePsd1)) { throw "Source Manifest not found: $sourcePsd1" }
+    $sourceVersion = Get-ModuleVersionFromPsd1 -Psd1Path $sourcePsd1
+    
+    # Build Target List
+    $targets = @()
+    
+    if ($ComputerName -and $ComputerName.count -gt 0) {
+        $targets += $ComputerName
+    
+        if ($AddToList) {
+            if (-not (Test-Path $ComputerListPath)) {
+                New-Item -Path $ComputerListPath -ItemType File -Force | Out-Null
+            }
+    
+            $existing = Get-content $ComputerListPath -ErrorAction SilentlyContinue | 
+                ForEach-Object { $_.Trim() } | Where-Object { $_ }
+    
+            $merged = ($existing + $ComputerName) | 
+                ForEach-Object { $_.Trim() } | Where-Object { $_ } | Sort-Object -Unique
+    
+            Set-Content -PassThru $ComputerListPath -Value $merged
+        }
+    }
+    
+    else {
+        if (-not (Test-Path $ComputerListPath)) {
+            throw "No ComputerName provided and list file not found: $ComputerListPath"
+        }
+        $targets = Get-Content $ComputerListPath | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+    }
+    
+    if (-not $targets -or $targets.count -eq 0) { throw "No target computers specified." }
+    
+    # --- Deploy ---
+    $results = foreach ($c in $targets) {
+        
+        $status = [ordered]@{ 
+            Computer       = $c 
+            Reachable      = $false
+            Action         = ''
+            RemoteVersion1 = ''
+            RemoteVersion2 = ''
+            SourceVersion  = $sourceVersion.ToString()
+            Message        = ''
+        }
+    
+        try { 
+            if (-not (Test-Connection -ComputerName $c -count 1 -Quiet)) {
+                $status.Action = 'Failed'
+                $status.Message = 'Ping Failed'
+                [pscustomobject]$status
+                continue
+            }
+            $status.Reachable = $true
+    
+            $remotebase = "\\$c\c$\ProgramFiles\WindowsPowerShell\Modules\$ModuleName"
+            $remotebase2 = "\\$c\c$\Windows\System32\WindowsPowerShell\v1.0\Modules\$ModuleName"
+
+            $remoteHighest = Get-HighestVersionFolder -Path $remotebase
+            $remoteHighest2 = Get-HighestVersionFolder -Path $remotebase2
+
+            if ($remoteHighest) { $status.RemoteVersion1 = $remoteHighest.ToString() } else { $status.RemoteVersion1 = 'Not Found' }
+            if ($remoteHighest2) { $status.RemoteVersion2 = $remoteHighest2.ToString() } else { $status.RemoteVersion2 = 'Not Found' }
+    
+            $needsUpdate = $Force -or (-not $remoteHighest) -or ($remoteHighest -lt $sourceVersion)
+            $needsUpdate2 = $Force -or (-not $remoteHighest2) -or ($remoteHighest2 -lt $sourceVersion)
+    
+            
+            <# Bypassing skipping until I can implement a check for each script.. -Mike Sprous
+
+            if (-not ($needsUpdate -and $needsUpdate2)) {
+                $status.Action = 'Skipped'
+                $status.Message = "Current version is installed ($sourceVersion)"
+                [pscustomobject]$status
+                continue
+            }
+
+            #>
+    
+            # Ensure module base exists
+            if (-not (Test-Path $remotebase)) {
+                New-Item -Path $remotebase -ItemType Directory -Force | Out-Null
+            }
+
+            if (-not (Test-Path $remotebase2)) {
+                New-Item -Path $remotebase2 -ItemType Directory -Force | Out-Null
+            }
+    
+            # Destination version folder
+            $remoteVersionPath = Join-Path $remotebase $sourceVersion.ToString()
+            $remoteVersionPath2 = Join-Path $remotebase2 $sourceVersion.ToString()
+    
+            # Remove version folder if it exists
+            if (Test-Path $remoteVersionPath) {
+                Remove-Item -Path $remoteVersionPath -Recurse -Force -ErrorAction Stop
+                Start-Sleep -Milliseconds 200
+            }
+
+            if (Test-Path $remoteVersionPath2) {
+                Remove-Item -Path $remoteVersionPath2 -Recurse -Force -ErrorAction Stop 
+                Start-Sleep -Milliseconds 200
+            }
+    
+            # Recreate folder
+            New-Item -Path $remoteVersionPath -ItemType Directory -Force | Out-Null
+            New-Item -Path $remoteVersionPath2 -ItemType Directory -Force | Out-Null
+    
+            # Copy module contents
+            Copy-Item -Path (Join-Path $SourceModuleRoot '*') -Destination $remoteVersionPath -Recurse -Force -ErrorAction SilentlyContinue
+            Copy-Item -Path (Join-Path $SourceModuleRoot '*') -Destination $remoteVersionPath2 -Recurse -Force -ErrorAction SilentlyContinue
+    
+            # prune old versions (keeps newest only)
+            if ($PruneOldVersions) {
+                $all = Get-ChildItem -Path $remotebase,$remotebase2 -Directory -ErrorAction SilentlyContinue
+                if ($all) {
+                    $versionDirs = foreach ($d in $all) {
+                        try {
+                            [pscustomobject]@{ Dir = $d.FullName; Ver = [version]$d.Name }
+                        } catch { }
+                    }
+
+                    if ($versionDirs) {
+                        $keeps = ($versionDirs | Sort-Object Ver -Descending | Select-Object -First 1).Dir
+                        foreach ($vd in $versionDirs) {
+                            if ($vd.Dir -ne $keeps) {
+                                try { Remove-Item -Path $vd.Dir -Recurse -Force -ErrorAction Stop } catch { }
+                            }
+                        }
+                    }
+                }
+            }
+
+            $status.Action = if ($remoteHighest -and $remoteHighest2) { 'Updated' } else { 'Installed' }
+            $status.Message = "Deployed $ModuleName $sourceVersion"
+            [pscustomobject]$Status
+        }
+
+        catch {
+            $Status.Action = 'Failed'
+            $status.Message = $_.Exception.Message
+            [pscustomobject]$status
+        }
+    }
+
+    $results | Sort-Object Computer | Format-Table -AutoSize
+}

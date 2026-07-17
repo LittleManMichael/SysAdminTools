@@ -1,0 +1,68 @@
+# Helpers\Core\Common.ps1
+
+function Write-FileSafe {
+    <# Salfe writes a file by ensuring parent folders exist and replacing existing files cleanly #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string]$Content
+    )
+
+    $parent = Split-Path -Parent $Path
+
+    if (-not (Test-Path $parent)) {
+        New-Item -Path $parent -ItemType Directory -Force | Out-Null
+    }
+
+    if (Test-Path $Path) {
+        Remove-Item -Path $Path -Force -ErrorAction SilentlyContinue
+    }
+
+    Set-Content -Path $Path -Value $Content -Encoding UTF8
+}
+
+function Get-DomainAdminCredentials {
+    <# Gather -AD credentials if requested by the script running. #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$ScriptName,
+
+        [Parameter(Mandatory=$false)]
+        [switch]$UseLocal
+    )
+
+    [bool]$credTested = $false
+    while ($credTested -eq $false) {
+        
+        # Request -AD Credentials
+        Write-Host "$scriptname requires -AD credentials to work correctly. Please enter your -AD credentials." -f Yellow
+        Write-SysAdminToolsLog -ScriptName $scriptName -Message "Starting -AD Credential check." -UseLocal:$UseLocal
+
+        $cred = Get-Credential -Message "Enter your -AD account credentials."
+        Add-Type -AssemblyName System.DirectoryServices.AccountManagement
+        $testCred = New-Object System.DirectoryServices.AccountManagement.PrincipalContext([System.DirectoryServices.AccountManagement.ContextType]::Domain)
+        $credTested = $testCred.ValidateCredentials($cred.GetNetworkCredential().UserName, $cred.GetNetworkCredential().Password)
+
+        if ($credTested -eq $false) {
+            Write-SysAdminToolsLog -ScriptName $scriptName -Message "Authenication Failure: Wrong password for $($cred.GetNetworkCredential().UserName)" -Level WARN -UseLocal:$UseLocal
+            Write-Host "ERROR: Your -AD credentials failed verificaiton. You will be prompted to re-enter them." -ForegroundColor Red
+            
+            if ((Get-ADUser -Identity $($cred.GetNetworkCredential().UserName) -Properties lockedout).lockedout) {
+                Write-SysAdminToolsLog -ScriptName $scriptName -Message "Authenication Failure: Account $($cred.GetNetworkCredential().UserName) is Locked Out. Exiting." -Level WARN -UseLocal:$UseLocal
+                throw "Your AD account is currently locked out."
+                break
+            }
+        }
+
+        if ($credTested) {
+            Write-SysAdminToolsLog -ScriptName $scriptName -Message "Authentication Succes: Account $($cred.GetNetworkCredential().UserName) successfully authenicated." -UseLocal:$UseLocal
+            Write-Host "Successfully Authenicated with: $($cred.GetNetworkCredential().UserName)" -f Green
+            return $cred 
+        }
+    }
+
+}

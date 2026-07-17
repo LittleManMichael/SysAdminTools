@@ -1,0 +1,114 @@
+function Check-DriveSpace {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$false)]
+        [string[]]$ServerNameLike = @('*FP0*', '*DC0*', '*MBX*'),
+
+        [Parameter(Mandatory=$false)]
+        [string[]]$ServerNameNotLike = @('*XDC*'),
+
+        [Parameter(Mandatory=$false)]
+        [switch]$ShowOutput,
+
+        [Parameter(Mandatory=$false)]
+        [switch]$UseLocal
+    )
+
+    # Info variables
+    $remoteData = Join-Path (Get-SysAdminToolsShareRoot) 'Data'
+    $localData = Join-Path (Get-SysAdminToolsModuleRoot) 'Data'
+    $reportDate = Get-Date -f "dd MMM yyyy"
+    $scriptName = 'Check-DriveSpace'
+    $ErrorActionPreference = 'Stop'
+
+    # Begin script
+    try {
+        
+        Write-Host ""
+        Write-Host "============================" -ForegroundColor DarkCyan
+        Write-Host " Starting Check-DriveSpace" -ForegroundColor Cyan
+        Write-Host "============================" -ForegroundColor DarkCyan
+        Write-Host ""
+        Write-SysAdminToolsLog -ScriptName $scriptName -Message "Starting." -UseLocal:$UseLocal
+
+        # -AD Account credentials are required. 
+        $cred = Get-DomainAdminCredentials -ScriptName $scriptName
+
+        # Gathering HTML table file
+        if ($UseLocal) { $html = Join-Path $localData 'Check-DriveSpace_tables.html' }
+        else { $html = $html = Join-Path $remoteData 'Check-DriveSpace_tables.html' }
+        $html = Get-Content $html -Raw
+        
+        # Create AD Filter
+        $NameFilter = ($ServerNameLike | foreach { "name -like '{0}'" -f ($_ -replace "'", "''") }) -join ' -or '
+        $NameFilter2 = ($ServerNameNotLike | foreach { "name -notlike '{0}'" -f ($_ -replace "'", "''") }) -join ' -or '
+        $adFilter = "OperatingSystem -like 'Windows Server*' -and ($NameFilter) -and ($NameFilter2)"
+    
+        # Gather List of Servers
+        Write-SysAdminToolsLog -ScriptName $scriptName -Message "Discovering servers in AD using filter: $adFilter" -UseLocal:$UseLocal
+        Write-Host "Querying Active Directory for Servers..." -ForegroundColor Yellow
+        Write-Host "AD Filter: $adFilter" -ForegroundColor DarkGray
+    
+        $Servers = @(Get-ADComputer -Filter $adFilter -ErrorAction Stop | Select -ExpandProperty Name) | Sort-Object Name
+            
+
+        # If no servers found, write warning and stop script.
+        if (-not $Servers) {
+            Write-SysAdminToolsLog -ScriptName 'Check-DriveSpace' -Level WARN -Message "No Servers Found matching filter. Exiting."
+            Write-Warning "No Servers were found. Script will now exit."
+            return
+        }
+
+        Write-SysAdminToolsLog -ScriptName $scriptName -Message ("Server count: {0}" -f $servers.count) -UseLocal:$UseLocal
+        Write-Host "Servers found: $($Servers.count)" -f Green
+
+        Write-SysAdminToolsLog -ScriptName $scriptName -Message "Begining drive space checks..." -UseLocal:$UseLocal
+        
+        $svrIndex = 0
+        foreach ($svr in $servers) {
+            $svrIndex++
+            
+            Write-SysAdminToolsLog -ScriptName $scriptName -Message ("{0}/{1} - Gathering Drives from {2}" -f $svrIndex, $servers.count, $svr) -UseLocal:$UseLocal
+            Write-Host "[$svrIndex/$($servers.count)] Checking server: $svr" -ForegroundColor Cyan
+
+            $online = $false
+            try {
+                $online = Test-Connection -ComputerName $svr -count 2 -BufferSize 16 -Quiet -ErrorAction Stop
+            }
+            catch { $online = $false }
+
+            if (-not $online) {
+                Write-SysAdminToolsLog -ScriptName $scriptName -Message "Server appears offline/unreachable: $svr" -Level WARN -UseLocal:$UseLocal
+                Write-Host "  Server Unreachable: $svr" -ForegroundColor Red
+                continue
+            }
+
+            Write-SysAdminToolsLog -ScriptName $scriptName -Message "Attempting drive collection: $svr" -UseLocal:$UseLocal
+            Write-Host "  Server online. Gathering Drives..." -ForegroundColor DarkYellow
+
+            # Begin drive collection
+            try {
+                if ($svr -like "*DC*") {
+                    $Drives = Get-WmiObject -Class Win32_Volume -ComputerName $svr -Credential $cred  | Select SystemName, DriveLetter, Label, Capacity, FreeSpace
+                } else {
+                    $Drives = Get-WmiObject -Class Win32_Volume -ComputerName $svr | Select SystemName, DriveLetter, Label, Capacity, FreeSpace
+                }
+
+            }
+            catch { }
+
+
+        } #end of foreach
+
+        
+
+    }
+    
+    # Script Fails to run entirely
+    catch {
+        Write-SysAdminToolsLog -ScriptName $scriptName -Message ("FAILED: {0}" -f $_.Exception.Message) -Level ERROR -UseLocal:$UseLocal
+        Write-SysAdminToolsErrorFile -ScriptName $scriptName -Exception $_.Exception -UseLocal:$UseLocal
+        Write-Host "$scriptName FAILED: $($_.Exception.Message)" -ForegroundColor Red 
+        throw
+    }
+}

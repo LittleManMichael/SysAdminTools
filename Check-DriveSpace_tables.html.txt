@@ -1,0 +1,42 @@
+<!DOCTYPE HTML>
+<html lang="en">
+    <style>
+        BODY{font-family: Arial; font-size: 8pt;}
+        H1{font-size: 16px;}
+        H2{font-size: 14px;}
+        H3{font-size: 12px;}
+
+        TABLE{border: 1px solid black; border-collapse: collapse; font-size 8pt;}
+        TH{border: 1px solid black; font-size: 12pt; background: #dddddd; padding: 8px; color: #000000;}
+        TD{border: 1px solid black; font-size: 10pt; padding: 8px;}
+        td.pass{background: #7FFF00;}
+        td.warn{background: #FFE600;}
+        td.fail{background: #FF0000; color: #ffffff;}
+        td.info{background: #85D4FF;}
+
+        tr:hover {background: #85D4FF;}
+        tr:hover td {background: transparent; color: #000000;}
+    </style>
+
+    <body>
+        <h1 align="center">Server Disk Space Report</h1>
+        <h3 align="center">Generated: <!-- ReportDate --></h3>
+
+        <table align='center'>
+            <tead>
+                <tr>
+                    <th><b>Server</b></th>
+                    <th><b>Drive Letter</b></th>
+                    <th><b>Label</b></th>
+                    <th><b>Disk Capacity (GB)</b></th>
+                    <th><b>Free Space (GB)</b></th>
+                    <th><b>Percentage Available</b></th>
+                </tr>
+            </thead>
+            
+            <tbody>
+                <!-- DATA ROWS -->
+            </tbody>
+        </table>
+    </body>
+</html>

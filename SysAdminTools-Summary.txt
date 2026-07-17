@@ -1,0 +1,202 @@
+Purpose
+SysAdminTools is an internally developed Windows PowerShell 5.1 module intended to improve the productivity, efficiency, standardization, and accountability of the System Administration (SA) team. The module provides a centralized framework for storing, maintaining, and executing operational administrative scripts relied upon by the SA team. Rather than maintaining individual copies of scripts across multiple machines, SysAdminTools provides a standardized structure and a single, trusted repository for shared operational tools.
+The primary goals of SysAdminTools are to:
+•	Improve operation efficiency by providing reusable administrative tools
+•	Standardize how shared scripts are written and executed
+•	Provide centralized logging and reporting for administrative actions
+•	Provide version tracking for script changes
+•	Reduce duplication of effort across the SA team
+SysAdminTools is not intended to prevent administrators from developing or running local scripts. It servers as the official shared repository for scripts the SA team depends on for operational tasks.
+
+Scope
+This TTP applies to the SA team’s use and maintenance of the SysAdminTools module across supported administrative endpoints. 
+Supported PowerShell Version: SysAdminTools currently supports Windows PowerShell 5.1. Newer version have not been tested, and may not work as expected.
+Platforms: SysAdminTools is used on persistent systems and VDI sessions. Import and update procedures differ by platform (See “Deployment and Import Procedures”).
+
+Authoritative Repository
+The administrative file share is the authoritative (source of truth) location for SysAdminTools. All operational changes must be made on the administrative share. Local copies installed on endpoints are deployments of the module and are where scripts are maintained. Changes made to local deployed copies may be overwritten during the next update and should be considered temporary.
+Authoritative share locations by domain: 
+•	N: \\adminshare\sysadmin powershell module\sysadmintools
+The SysAdminTools repository includes:
+•	Operational scripts
+•	Helper functions
+•	Module Configuration
+•	Logs and Errors (central locations)
+•	Reports
+•	Documentation
+This design ensures the SA team has a single trusted version of shared scripts and supporting functions. 
+
+Module Architecture
+SysAdminTools is structured as a PowerShell module that loads operational scripts and helper functions when imported
+Folder scructure
+SysAdminTools/
+│
+├── Scripts/
+│   └── ScriptName/
+│       ├── ScriptName.ps1
+│       ├── Archive/
+│       └── Data/
+│
+├── Helpers/
+│   ├── Core/
+│   └── Maintenance/
+├── Logs/
+├── Reports/
+├── Errors/
+├── Data/
+├── Docs/
+├── SysAdminTools.psd1
+└── SysAdminTools.psm1
+
+Scripts
+Scripts are .ps1 files organized into folders under the scripts directory. Each script resides in its own subdirectory and may include:
+•	The current script file
+•	Archived script versions
+•	Optional supporting data files
+Helpers
+Helpers are .ps1 files that provide shared functionality used across multiple scripts and support module maintenance activities.
+Core Helpers
+Examples may include:
+•	Logging and message standardization
+•	Path resolution
+•	Configuration handling
+•	Safe file writing
+•	Credential handling
+Maintenance Helpers
+Examples may include:
+•	Script version management support
+•	Repository health checks/validation
+•	Module deployment/update support
+Module Files
+SysAdminTools is implemented using standard PowerShell module components, including:
+•	SysAdminTools.psd1 (module manifest)
+•	SysAdminTools.psm1 (module loader)
+
+Deployment and Import Procedures
+SysAdminTools is made available to administrators through two supported methods:
+Persistent Systems
+Persistent systems are physical workstations, or virtual servers. SysAdminTools can be installed/updated locally on the system, or updated remotely (from a different machine). When updates are required, administrators may execute a remote update to install or update SysAdminTools on one or more persistent systems.
+VDI Sessions
+VDI sessions do not include SysAdminTools by default. Administrators must import SYsAdminTools into their current session using the provided import script each time they log into a new session. 
+Importing Procedure
+Persistent Systems (install/update):
+1.	Verify the current worksation you are using has SysAdminTools installed (so the Update-SysAdminTools command is available).
+2.	Open an elevated Windows PowerShell console or ISE
+3.	Run on of the following:
+a.	Update one computer;
+Run: Update-SysAdminTools -computername <computername>
+If prompted, you may be asked whether to add the targeted computer to the CSV list used for updates. The CSV list can be found on the authoritative share under the Data folder and is named SysAdminComputer.csv
+b.	Update computers from the CSV list;
+Run Update-SysAdminTools (with no parameters)
+Every computer listed in the CSV list will be updated
+4.	Allow the command to complete and review any on-screen warnings or errors.
+Expected result: The specified target machine (or machines from the CSV list) receive the updated SysAdminTools deployment and load the updated module automatically.
+VDI Session (Import for current session):
+1.	Copy the Import-SysAdminTools.txt file from the SysAdminTools share to your home drive (desktop preferred). This is typically a one-time step.
+2.	In the VDI session, open an elevated Windows PowerShell console or ISE
+3.	Open the .txt file, copy the contents, paste it into the console, then press Enter.
+4.	Allow the script to process and answer any prompts (for example, if a previous deployment exists). 
+5.	Review any on-screen warnings or errors.
+Expected result: SysAdminTools scripts and commands are available for the current VDI session.
+
+Validation
+Use the steps below to confirm SysAdminTools is available in your current PowerSHell session:
+1.	In Windows PowerShell, run: Get-Module SysAdminTools
+* if SysAdminTools is loaded, it will be listed.
+2.	To view available commands, run: Get-Command -Module SysAdminTools
+If SysAdminTools reports that your local deployments is out of date, follow the update/import steps. Current behavior is warn-only (scripts will warn, but may still run).
+
+Script Execution
+Once SysAdminTools is available in the PowerShell session, operational scripts are intended to function as PowerShell commands.
+Scripts may be implemented as:
+•	Command-line execution (minimal or no parameters)
+Example: Get-StaleUses
+•	Parameter-based execution (admin provides parameters)
+Example: Test-ExchangeServerHealthChecks -SendEmail -Server server01
+•	GUI-based execution (when implemented)
+Example: BattleRhythm
+
+Logging, Errors, and Reports
+SysAdminTools records execution details to support troubleshooting and accountability. Depending on the script, captured data may include execution time, administrator username, machine name, script name, information messages, warnings, and errors.
+Logging Model
+SysAdminTools uses a local-first logging model. During script execution, log output is written locally to the endpoint. When the script completes (successfully or not), the log file is automatically uploaded to the Logs folder within the authoritative SysAdminTools share.
+Operator Notes:
+•	If a script generates a warning or error, reference the uploaded log in the share for centralized review and retention
+•	If the share upload fails (for example transient connectivity), the local log remains available on the endpoint for late upload/collection.
+
+Logs
+Logs are created for normal script execution and general troubleshooting details. Logs are written locally and then uploaded to the share when the script completes (success or failure). 
+Log Locations
+Local: C:\Downloads\SysAdminTools\Logs
+Share: sharelocaiton
+
+Errors
+Errors are created only when a script encounters a termination condition (an error that prevents safe continuation). Error files are intended to quickly highlight failures that require attention and are separate from normal logs.
+Error Locations
+Local: C:\Downloads\SysAdminTools\Errors
+Share: sharelocation
+Reports
+Reports are generated outputs intended for operational use (for example: list of users, compliance results, health summaries). Reports are written directly to the authoritative share by default and use a consistent naming format.
+Report Naming: <scriptname>_<timestamp>.<ext>
+Some scripts may support an optional parameter to write reports to a specific folder:
+•	-ReportPath <folderpath>
+Example: Get-DataCall -ReportPath “C:\Downloads”
+
+Report Locations
+Share: sharelocaiton
+
+Local Log and Error Cleanup (Persistent Systems)
+To prevent local SysAdminTools files from building up on persistent systems, a maintenance script is provided to collect and clean up local logs and errors. 
+Clean-SysAdminToolsLogs performs the following actions on persistent systems:
+•	Checks c:\downloads\sysadmintools\logs and c:\downloads\sysadmintools\errors
+•	Compares local files to the authoritative share locations
+•	Uploads any missing logs/errors to the share
+•	Deletes local logs/errors after confirming they exist on the share
+This script uses the same target list located on the authoritative share under the Data folder: SysAdminComputers.csv
+Operator Notes:
+•	VDI Sessions do not require cleanup because c:\downloads is reset at logoff/disconnect.
+•	If a system is offline or unreachable, logs/errors will remain local until the next successful run.
+•	Run this script as needed (for example, periodic cleanup after troubleshooting when you want to ensure logs were collection).
+
+Change, Testing, and Recovery (Guidance)
+SysAdminTools is a shared operational repository. To keep tools reliable and consistent for the team, use the following practices when making changes.
+Unfinished / In-progress work
+Use this section when you are actively developing or modifying a script, but are not ready for others to use it. The goal is to prevent incomplete changes from impacting operational tools. 
+•	Do not overwrite the operational script with incomplete work.
+•	Save work-in-progress as a separate file using the naming standard: *_WIP.ps1
+Example: Get-StaleUsers_WIP.ps1
+
+Safe Testing
+Use this section to validate changes before they are used broadly. Testing reduces the change of unintended impact to systems, accounts, or production workflows.
+•	Test changes locally or in an isolated group when possible.
+•	Start with the smallest safe scope before running against large groups of system/users.
+•	Confirm the script completes successfully and review the generated log output. 
+Making a change Operational
+Use this sectional when you are ready to replace the operational script with your updated version. The goal is to ensure the script is stable, understandable, and produces expected output/logging. 
+Before replacing the operational script:
+•	Ensure the script runs without errors for the intended use case.
+•	Ensure any required parameters and usage examples are accurate.
+•	Ensure logging output is created as expected.
+When replacing the operational script:
+•	Open an elevated Windows PowerShell console ISE
+•	Run the command Update-ScriptVersion -scriptname <scriptname> -newversion <x.x.x> -notes “…” 
+Example: Upate-ScriptVersion -scriptname Get-StaleUsers -newversion 1.1.2 -notes “Updated the reporting method to include more information about the user. -Mike Sprous”
+
+Reverting a Broken Change
+Use this section if a change causes errors, unexpected behavior, or operational impact. The goal is to restore the script to the last known-good version.
+•	Restore the last known-good version from the script’s Archive folder.
+•	Notify the team (turnover notes/email) of what changed and that a revert occurred.
+When restoring the last known-good version:
+•	Rename the current operational script *_BROKEN.ps1
+Example: Get-StaleUsers_BROKEN.ps1
+•	In the script’s Archive folder, copy the last known-good version and paste the file into the scripts primary folder (non-Archive folder). 
+•	Rename the last known-good version to the script’s name.
+Example: Get-StaleUsers.ps1
+
+Responsibilities and Notification
+All SysAdminTools scripts, helpers, and module changes must be made directly on the authoritative share. Local copies on endpoints are deployments and should not be treated as the source of truth.
+After making a change to an operational script or helper:
+•	Update the script version using the module’s versioning process (see “Making a Change Operational”).
+•	If the change impacts other administrators (new tool, behavior change, parameter change, removal, or known limitations), notify the team via turnover notes and/or email.
+Administrators should avoid overwriting operational scripts with unfinished work. Use the *_WIP.ps1 convention for development work-in-progress.
+
