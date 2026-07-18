@@ -1,0 +1,143 @@
+﻿function Check-DriveSpace {
+
+[cmdletbinding()]
+param([Parameter(Mandatory=$false)][switch]$ShowOutput)
+
+Function brk {Write-Host ""}
+
+Function Show-Output {
+    param([switch]$Low,[switch]$Critical,[switch]$AllGood,[switch]$Tier3,[switch]$FailedPing)
+    
+    If($Low){
+        Write-Host "$outputname - " -f Yellow -no ; Write-Host "Capacity : " -f Gray -no ; Write-Host "$Size" -f Yellow -no ; Write-Host "GB " -f Gray -no ; Write-Host " | " -f DarkGray -no 
+        Write-Host "Free Space : " -f Gray -no ; Write-Host "$sFree" -f Yellow -no ; Write-Host "GB " -f Gray -no ; Write-Host " | " -f DarkGray -no 
+        Write-Host "Percent Free : " -f Gray -no ; Write-Host "$pfree " -f Yellow -no ; Write-Host " | " -f DarkGray -no 
+        Write-Host "Status : " -f Gray -no ; Write-Host "LOW" -f Yellow -b Black
+        }
+    If($Critical){
+        Write-Host "$outputname - " -f Yellow -no ; Write-Host "Capacity : " -f Gray -no ; Write-Host "$Size" -f Yellow -no ; Write-Host "GB " -f Gray -no ; Write-Host " | " -f DarkGray -no 
+        Write-Host "Free Space : " -f Gray -no ; Write-Host "$sFree" -f Yellow -no ; Write-Host "GB " -f Gray -no ; Write-Host " | " -f DarkGray -no 
+        Write-Host "Percent Free : " -f Gray -no ; Write-Host "$pfree " -f Yellow -no ; Write-Host " | " -f DarkGray -no 
+        Write-Host "Status : " -f Gray -no ; Write-Host "CRITICAL" -f Red -b Black
+        }
+    If($AllGood){Write-Host "---- ALL DRIVES ABOVE THRESHOLD ON " -f Green -no ; Write-Host "$Svr " -f Cyan -no ; Write-Host "----" -f Green}
+    If($Tier3){Write-Host "---- TIER 3 REQUIRED FOR " -f Magenta -no ; Write-Host "$Svr " -f Cyan -no ; Write-Host "----" -f Magenta}
+    If($FailedPing){Write-Host "---- CONNECTION FAILED FOR " -f Magenta -no ; Write-Host "$Svr " -f Cyan -no ; Write-Host "----" -f Magenta}
+
+}
+
+$Servers = Get-ADComputer -Filter {(Name -like "*DC0*") -and (Name -notlike "*XDC*") -or (Name -like "*FP0*") -or (Name -like "*MBX0*") -and (OperatingSystem -like "Windows Server*")} | Sort Name | Select -expand Name
+$ReportDate = Get-Date -f "dd MMM yyyy"
+$tscnt = $Servers.Count
+$scnt = 1
+
+Write-Host "CHECKING DRIVE SPACE OF ALL DC,FP,MBX SERVERS..." -f Yellow -b Black
+If($ShowOutput){
+    Write-Host "THE FOLLOWING SERVERS HAVE EITHER " -f White -b Black -no ; Write-Host "LOW " -f Yellow -b Black -no ; Write-Host "OR " -f White -b Black -no ; Write-Host "CRITICAL " -f Red -b Black -no ; 
+    Write-Host "SPACE AVAILABLE..." -f White -b Black ; brk
+}
+
+$htmlhead = "
+    <html>
+    <style>
+    BODY{font-family: Arial; font-size: 8pt;}
+    H1{font-size: 16px;}
+    H2{font-size: 14px;}
+    H3{font-size: 12px;}
+    TABLE{border: 1px solid black; border-collapse: collapse; font-size: 8pt;}
+    TH{border: 1px solid black; font-size: 12pt; background: #dddddd; padding: 8px; color: #000000;}
+    TD{border: 1px solid black; font-size: 10pt; padding: 8px;}
+    td.pass{background: #7FFF00;}
+    td.warn{background: #FFE600;}
+    td.fail{background: #FF0000; color: #ffffff;}
+    td.info{background: #85D4FF;}
+    </style>
+    <body>
+    <h1 align='center'>Server Disk Space Report</h1>
+    <h3 align='center'> Generated: $ReportDate</h3>"
+
+$htmlTable = "
+    <table align='center'>
+    <tr>
+    <th><b>Server</b></th>
+    <th><b>Drive Letter</b></th>
+    <th><b>Label</b></th>
+    <th><b>Disk Capacity (GB)</b></th>
+    <th><b>Free Space (GB)</b></th>
+    <th><b>Percentage Available</b></th>
+    </tr>"
+
+ForEach($Svr in $Servers){
+    
+    # Writing the Progress
+    [int]$Percent = $scnt / $tscnt * 100
+    Write-Progress -Activity "CHECKING DRIVES OF $Svr" -Status "SERVER $scnt OF $tscnt | $Percent%" -PercentComplete $Percent
+    $scnt++
+
+    If($ShowOutput){Write-Host "------------ PROCESSING $Svr ------------" -f White}
+
+    $Ping = Test-Connection $Svr -Count 2 -ErrorAction Si 
+    If($Ping){
+        Try{$Drives = Get-WmiObject -Class Win32_Volume -ComputerName $Svr | Select SystemName,DriveLetter,Label,Capacity,FreeSpace
+        $drivesgood = $true
+
+        # Go through each drive
+        ForEach($Dr in $Drives){
+            $Letter = $Dr.DriveLetter
+            $Name = $Dr.Label
+            If($Letter.Length -gt 0){$outputname = "$Letter $Name"}Else{$outputname = "$Name"}
+            [int]$Size = [math]::Round(([long]$Dr.Capacity / 1GB),2)
+            [int]$sFree = [math]::Round(([long]$Dr.FreeSpace / 1GB),2)
+            If($sFree -gt 0){[int]$pFree = 100 * ([math]::Round($sFree / $Size,2))} Else{$pFree = 0}
+
+            Switch($Letter){
+                'A:'{ }
+                'Z:'{ }
+                Default{
+                    If($Dr.Label -eq 'BOOT' -or ($dr.Label -eq $null -or ($dr.Capacity -lt 1))){ } Else{
+                    If($pFree -gt 20){ } # Drive is over 20% Free
+                    ElseIf($pFree -lt 11){ # Drive is under 11% Free
+                        $htmlTable += "<tr>
+                                       <td>$Svr</td>
+                                       <td>$Letter</td>
+                                       <td>$Name</td>
+                                       <td>$Size GB</td>
+                                       <td>$sFree GB</td>
+                                       <td class='fail'>$pFree%</td>
+                                       </tr>"
+                        $drivesgood = $false ; If($ShowOutput){Show-Output -Critical}
+                    }
+                    Else{ # Drive is between 11-20 Percent Free
+                        $htmlTable += "<tr>
+                                       <td>$Svr</td>
+                                       <td>$Letter</td>
+                                       <td>$Name</td>
+                                       <td>$Size GB</td>
+                                       <td>$sFree GB</td>
+                                       <td class='warn'>$pFree%</td>
+                                       </tr>"
+                        $drivesgood = $false ; If($ShowOutput){Show-Output -Low}
+                    }
+                    }
+                } # End of Default
+            } # End of Switch
+        } # End of Each Drive
+        If($drivesgood -eq $true){If($ShowOutput){Show-Output -AllGood}}
+    }Catch{If($ShowOutput){Show-Output -Tier3}}
+    }Else{If($ShowOutput){Show-Output -FailedPing}}
+    If($ShowOutput){brk ; brk}
+} # End of ForEach Server
+
+$htmlTable += "</table>"
+$htmltail = "</body></html>"
+$htmlreport = $htmlhead + $htmlTable + $htmltail
+$User = $env:USERNAME.Replace("-admin","")
+$smtpsettings = @{
+    To = "-nocsustainment@newton.pentagon.mil"
+    From = "$User@newton.pentagon.mil"
+    Subject = "Server Disk Space Report"
+    SmtpServer = "N020MBX02.newton.pentagon.mil"
+    }
+Send-MailMessage @smtpsettings -Body $htmlreport -BodyAsHtml                     
+
+}
